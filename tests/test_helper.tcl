@@ -41,18 +41,22 @@ set ::all_tests {
     integration/rdb
     integration/convert-zipmap-hash-on-load
     integration/logging
+    integration/psync2
     unit/pubsub
     unit/slowlog
     unit/scripting
     unit/maxmemory
     unit/introspection
+    unit/introspection-2
     unit/limits
     unit/obuf-limits
     unit/bitops
     unit/bitfield
+    unit/geo
     unit/memefficiency
     unit/hyperloglog
     unit/lazyfree
+    unit/wait
 }
 # Index to the next test to run in the ::all_tests list.
 set ::next_test 0
