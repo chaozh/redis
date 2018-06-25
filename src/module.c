@@ -2239,6 +2239,9 @@ int RM_HashSet(RedisModuleKey *key, int flags, ...) {
          * to avoid a useless copy. */
         if (flags & REDISMODULE_HASH_CFIELDS)
             low_flags |= HASH_SET_TAKE_FIELD;
+
+        robj *argv[2] = {field,value};
+        hashTypeTryConversion(key->value,argv,0,1);
         updated += hashTypeSet(key->value, field->ptr, value->ptr, low_flags);
 
         /* If CFIELDS is active, SDS string ownership is now of hashTypeSet(),
@@ -3396,7 +3399,7 @@ void RM_LogRaw(RedisModule *module, const char *levelstr, const char *fmt, va_li
  *
  * If the specified log level is invalid, verbose is used by default.
  * There is a fixed limit to the length of the log line this function is able
- * to emit, this limti is not specified but is guaranteed to be more than
+ * to emit, this limit is not specified but is guaranteed to be more than
  * a few lines of text.
  */
 void RM_Log(RedisModuleCtx *ctx, const char *levelstr, const char *fmt, ...) {
