@@ -58,6 +58,13 @@ void queueMultiCommand(client *c) {
     multiCmd *mc;
     int j;
 
+    /* No sense to waste memory if the transaction is already aborted.
+     * this is useful in case client sends these in a pipeline, or doesn't
+     * bother to read previous responses and didn't notice the multi was already
+     * aborted. */
+    if (c->flags & CLIENT_DIRTY_EXEC)
+        return;
+
     c->mstate.commands = zrealloc(c->mstate.commands,
             sizeof(multiCmd)*(c->mstate.count+1));
     mc = c->mstate.commands+c->mstate.count;
@@ -106,11 +113,13 @@ void discardCommand(client *c) {
 /* Send a MULTI command to all the slaves and AOF file. Check the execCommand
  * implementation for more information. */
 void execCommandPropagateMulti(client *c) {
-    robj *multistring = createStringObject("MULTI",5);
-
-    propagate(server.multiCommand,c->db->id,&multistring,1,
+    propagate(server.multiCommand,c->db->id,&shared.multi,1,
               PROPAGATE_AOF|PROPAGATE_REPL);
-    decrRefCount(multistring);
+}
+
+void execCommandPropagateExec(client *c) {
+    propagate(server.execCommand,c->db->id,&shared.exec,1,
+              PROPAGATE_AOF|PROPAGATE_REPL);
 }
 
 void execCommand(client *c) {
@@ -123,6 +132,15 @@ void execCommand(client *c) {
 
     if (!(c->flags & CLIENT_MULTI)) {
         addReplyError(c,"EXEC without MULTI");
+        return;
+    }
+
+    /* If we are in -BUSY state, flag the transaction and return the
+     * -BUSY error, like Redis <= 5. This is a temporary fix, may be changed
+     *  ASAP, see issue #7353 on Github. */
+    if (server.lua_timedout) {
+        flagTransaction(c);
+        addReply(c, shared.slowscripterr);
         return;
     }
 
@@ -170,13 +188,18 @@ void execCommand(client *c) {
          * This way we'll deliver the MULTI/..../EXEC block as a whole and
          * both the AOF and the replication link will have the same consistency
          * and atomicity guarantees. */
-        if (!must_propagate && !(c->cmd->flags & (CMD_READONLY|CMD_ADMIN))) {
+        if (!must_propagate &&
+            !server.loading &&
+            !(c->cmd->flags & (CMD_READONLY|CMD_ADMIN)))
+        {
             execCommandPropagateMulti(c);
             must_propagate = 1;
         }
 
-        int acl_retval = ACLCheckCommandPerm(c);
+        int acl_keypos;
+        int acl_retval = ACLCheckCommandPerm(c,&acl_keypos);
         if (acl_retval != ACL_OK) {
+            addACLLogEntry(c,acl_retval,acl_keypos,NULL);
             addReplyErrorFormat(c,
                 "-NOPERM ACLs rules changed between the moment the "
                 "transaction was accumulated and the EXEC call. "
